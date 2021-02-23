@@ -5087,7 +5087,7 @@ sub _cPosMark {
             confess "Error: not a valid nDot string: [$trPos]";
         }
         elsif ( $s1 eq '-' ) {
-            $cDot = ( ( $csta == 0 ) ? 1 : ( -$csta ) ) . '-u' . $anchor;
+            $cDot = -$anchor - $csta;
         }
         elsif ( $s1 eq '+' ) {
             $cDot = (
