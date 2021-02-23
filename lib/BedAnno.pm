@@ -9,13 +9,13 @@ use Time::HiRes qw(gettimeofday tv_interval);
 
 use Tabix;
 
-our $VERSION = '1.19';
+our $VERSION = '1.22';
 
 =head1 NAME
 
 BedAnno - Perl module for annotating variation depend on the BED format database.
 
-=head2 VERSION v1.19
+=head2 VERSION v1.22
 
 From version 0.32 BedAnno will change to support CG's variant shell list
 and use ncbi annotation release 104 as the annotation database
@@ -1581,7 +1581,7 @@ sub readtr {
 
     my $fas_h;
     if ($self->{tr} =~ /\.gz$/) {
-        $fas_h = new IO::Uncompress::Gunzip $self->{tr}, AUTOCLOSE => 1
+        $fas_h = new IO::Uncompress::Gunzip $self->{tr}, AUTOCLOSE => 1, MultiStream => 1
             or confess "Error: [$self->{tr}] $GunzipError\n";
     }
     else {
@@ -1755,7 +1755,7 @@ sub load_anno {
     my $annodb_h;
     if ( 0 == @query_region ) {
         $read_all_opt = 1;
-        $annodb_h = new IO::Uncompress::Gunzip $self->{db}, AUTOCLOSE => 1
+        $annodb_h = new IO::Uncompress::Gunzip $self->{db}, AUTOCLOSE => 1, MultiStream => 1
             or confess "Error: [$self->{db}] $GunzipError\n";
     }
     else {
@@ -2270,6 +2270,10 @@ sub varanno {
     if ( $var->{gHGVS} =~ /\]$/ ) {
         $var->{standard_gHGVS} = gen_standard_gphgvs( $var->{gHGVS} );
         $var->{alt_gHGVS}      = gen_alt_ghgvs( $var->{gHGVS} );
+    }
+    if ( $var->{gHGVS} =~ /del[ACGTN]+ins/ ) {
+        $var->{standard_gHGVS} = $var->{gHGVS};
+        $var->{standard_gHGVS} =~ s/del[ACGTN]+ins/delins/;
     }
 
     # Due to the bed format database,
@@ -2834,6 +2838,12 @@ sub finaliseAnno {
               if ( exists $trAnnoEnt->{standard_pHGVS} );
             $trAnnoEnt->{alt_p3} = P1toP3( $trAnnoEnt->{alt_pHGVS} )
               if ( exists $trAnnoEnt->{alt_pHGVS} );
+
+            # add standard_cHGVS for delXXXinsXXX format cHGVS, for the need of standardization
+            if ( exists $trAnnoEnt->{c} and $trAnnoEnt->{c} =~ /del[ACGTN]+ins/) {
+                $trAnnoEnt->{standard_cHGVS} = $trAnnoEnt->{c};
+                $trAnnoEnt->{standard_cHGVS} =~ s/del[ACGTN]+ins/delins/;
+            }
 
             $trAnnoEnt->{trVarName} = _getTrVarName( $tid, $trAnnoEnt );
         }
@@ -6064,28 +6074,12 @@ sub getUnifiedVar {
 
     my $consAL = $$var{altlen};
 
-    if ( exists $var->{p} ) {    # rep
+    if (!$norep and exists $var->{p} ) {    # rep
         $consPos = $$var{p};
-        if ($norep) {
-            if ($$var{rl} < $$var{al}) {
-                $consRef = "";
-                $consRL  = 0;
-                $consAlt = $$var{rep} x ($$var{alt_cn} - $$var{ref_cn});
-                $consAL  = $$var{al} - $$var{rl};
-            }
-            else {
-                $consAlt = "";
-                $consAL  = 0;
-                $consRef = $$var{rep} x ($$var{ref_cn} - $$var{alt_cn});
-                $consRL  = $$var{rl} - $$var{al};
-            }
-        }
-        else {
-            $consRef = $$var{r};
-            $consAlt = $$var{a};
-            $consRL  = $$var{rl};
-            $consAL  = $$var{al};
-        }
+        $consRef = $$var{r};
+        $consAlt = $$var{a};
+        $consRL  = $$var{rl};
+        $consAL  = $$var{al};
     }
     elsif ( exists $var->{bp} ) {    # complex bc strand same
         $consPos = $$var{bp};
@@ -6221,8 +6215,8 @@ sub parse_complex {
                 my $lofs   = length($`);    # $` is the prematched string
 
                 my $cn = check_div( $rep_el, \@absdiff );
+                my $lenrep = length($rep_el);
                 if ( $cn and check_insrep( $larger, $smaller, $rep_el, $cn ) ) {
-                    my $lenrep = length($rep_el);
 
                     @$var{qw(p rep replen)} =
                       ( ( $var->{pos} + $lofs ), $rep_el, $lenrep );
@@ -6253,6 +6247,9 @@ sub parse_complex {
                     $var->{sm} = ( $var->{rl} == 1 ) ? 1 : 2;
 
                     return $var;
+                }
+                else {
+                    pos($larger) -= $lenrep * ($rep + 1) - 1;
                 }
                 $has{$rep_el} = 1;
             }
